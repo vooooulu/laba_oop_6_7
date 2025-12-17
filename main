@@ -1,0 +1,288 @@
+class VectorEditor(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Векторный редактор - ЛР6+ЛР7")
+        self.setGeometry(100, 100, 1200, 800)
+
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #353535;
+            }
+            QToolBar {
+                background-color: #454545;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                spacing: 5px;
+                padding: 5px;
+            }
+            QToolButton {
+                background-color: #565656;
+                border: 1px solid #666666;
+                border-radius: 3px;
+                padding: 5px;
+                color: white;
+                font-weight: bold;
+            }
+            QToolButton:hover {
+                background-color: #676767;
+                border: 1px solid #777777;
+            }
+            QToolButton:pressed {
+                background-color: #454545;
+            }
+            QTreeView {
+                background-color: #3a3a3a;
+                color: #e0e0e0;
+                border: 1px solid #4a4a4a;
+                border-radius: 3px;
+                font-size: 11pt;
+            }
+            QTreeView::item {
+                padding: 5px;
+            }
+            QTreeView::item:selected {
+                background-color: #505070;
+                color: white;
+            }
+            QTreeView::item:hover {
+                background-color: #454545;
+            }
+            QStatusBar {
+                background-color: #454545;
+                color: #e0e0e0;
+                border-top: 1px solid #555555;
+            }
+        """)
+
+        central_widget = QWidget()
+        central_widget.setStyleSheet("background-color: #353535;")
+        self.setCentralWidget(central_widget)
+
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+
+        # Верхняя часть с холстом и деревом
+        top_widget = QWidget()
+        top_layout = QHBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(10)
+
+        self.tree_view = QTreeView()
+        self.tree_view.setHeaderHidden(False)
+        self.tree_view.setAlternatingRowColors(True)
+        self.tree_view.setMinimumWidth(250)
+
+        self.canvas = CanvasWidget()
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(self.tree_view)
+        splitter.addWidget(self.canvas)
+        splitter.setSizes([300, 900])
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #555555;
+                width: 3px;
+            }
+        """)
+
+        top_layout.addWidget(splitter)
+        main_layout.addWidget(top_widget, 4)
+
+        # Нижняя часть с панелью свойств
+        self.properties_panel = PropertiesPanel()
+        self.properties_panel.set_container(self.canvas.container)
+        main_layout.addWidget(self.properties_panel, 1)
+
+        self.model = TreeViewModel(self.canvas.container)
+        self.tree_view.setModel(self.model)
+
+        self.create_toolbar()
+        self.create_menu()
+
+        self.statusBar().showMessage("Готово к работе")
+
+    def create_toolbar(self):
+        toolbar = QToolBar("Инструменты")
+        icon_size = 24
+        toolbar.setIconSize(QSize(icon_size, icon_size))
+        self.addToolBar(toolbar)
+
+        shapes = [
+            ("□", "rectangle", "Прямоугольник"),
+            ("○", "circle", "Круг"),
+            ("■", "square", "Квадрат"),
+            ("◯", "ellipse", "Эллипс"),
+            ("△", "triangle", "Треугольник"),
+            ("—", "line", "Линия"),
+            ("➤", "arrow", "Стрелка")
+        ]
+
+        for icon, tool, tip in shapes:
+            action = QAction(icon, self)
+            action.setToolTip(tip)
+            action.triggered.connect(lambda checked, t=tool: self.set_tool(t))
+            toolbar.addAction(action)
+
+        toolbar.addSeparator()
+
+        actions = [
+            ("📁", self.group_selected, "Группировать (Ctrl+G)"),
+            ("📄", self.ungroup_selected, "Разгруппировать (Ctrl+U)"),
+            ("➕", self.scale_up, "Увеличить (+)"),
+            ("➖", self.scale_down, "Уменьшить (-)"),
+            ("🎨", self.change_color, "Изменить цвет"),
+            ("💾", self.save_project, "Сохранить проект"),
+            ("📂", self.load_project, "Загрузить проект"),
+            ("🗑️", self.delete_selected, "Удалить (Del)"),
+            ("🧹", self.clear_all, "Очистить всё")
+        ]
+
+        for icon, handler, tip in actions:
+            action = QAction(icon, self)
+            action.setToolTip(tip)
+            action.triggered.connect(handler)
+            toolbar.addAction(action)
+
+    def create_menu(self):
+        menubar = self.menuBar()
+        menubar.setStyleSheet("""
+            QMenuBar {
+                background-color: #454545;
+                color: white;
+                border-bottom: 1px solid #555555;
+            }
+            QMenuBar::item {
+                background-color: transparent;
+                padding: 5px 15px;
+            }
+            QMenuBar::item:selected {
+                background-color: #565656;
+            }
+            QMenu {
+                background-color: #454545;
+                color: white;
+                border: 1px solid #555555;
+            }
+            QMenu::item {
+                padding: 8px 30px;
+            }
+            QMenu::item:selected {
+                background-color: #565656;
+            }
+        """)
+
+        file_menu = menubar.addMenu("📁 Файл")
+        file_menu.addAction("💾 Сохранить проект", self.save_project, "Ctrl+S")
+        file_menu.addAction("📂 Загрузить проект", self.load_project, "Ctrl+O")
+        file_menu.addSeparator()
+        file_menu.addAction("🧹 Очистить всё", self.clear_all)
+        file_menu.addSeparator()
+        file_menu.addAction("🚪 Выход", self.close)
+
+        edit_menu = menubar.addMenu("✏️ Правка")
+        edit_menu.addAction("📁 Группировать", self.group_selected, "Ctrl+G")
+        edit_menu.addAction("📄 Разгруппировать", self.ungroup_selected, "Ctrl+U")
+        edit_menu.addSeparator()
+        edit_menu.addAction("➕ Увеличить", self.scale_up, "+")
+        edit_menu.addAction("➖ Уменьшить", self.scale_down, "-")
+        edit_menu.addSeparator()
+        edit_menu.addAction("🎨 Изменить цвет", self.change_color)
+        edit_menu.addAction("🗑️ Удалить", self.delete_selected, "Del")
+
+        shapes_menu = menubar.addMenu("🔷 Фигуры")
+        shapes = [
+            ("Прямоугольник", "rectangle"),
+            ("Круг", "circle"),
+            ("Квадрат", "square"),
+            ("Эллипс", "ellipse"),
+            ("Треугольник", "triangle"),
+            ("Линия", "line"),
+            ("Стрелка", "arrow")
+        ]
+
+        for name, tool in shapes:
+            shapes_menu.addAction(name, lambda t=tool: self.set_tool(t))
+
+        help_menu = menubar.addMenu("❓ Справка")
+        help_menu.addAction("📖 О программе", self.show_about)
+
+    def set_tool(self, tool):
+        self.canvas.set_tool(tool)
+        self.statusBar().showMessage(f"Инструмент: {tool}", 2000)
+
+    def change_color(self):
+        self.canvas.change_selected_color()
+
+    def delete_selected(self):
+        selected = self.canvas.container.get_selected()
+        if selected:
+            count = len(selected)
+            for obj in selected:
+                self.canvas.container.remove(obj)
+            self.statusBar().showMessage(f"Удалено {count} объектов", 3000)
+        else:
+            QMessageBox.information(self, "Информация", "Сначала выберите объекты")
+
+    def clear_all(self):
+        self.canvas.container.clear()
+        self.statusBar().showMessage("Все объекты удалены", 3000)
+
+    def group_selected(self):
+        self.canvas.group_selected()
+
+    def ungroup_selected(self):
+        self.canvas.ungroup_selected()
+
+    def save_project(self):
+        self.canvas.save_project()
+
+    def load_project(self):
+        self.canvas.load_project()
+
+    def scale_up(self):
+        """Увеличить выбранные объекты"""
+        scale_factor = 1.1  # Увеличение на 10%
+        self.canvas.container.scale_selected(scale_factor)
+        self.statusBar().showMessage(f"Увеличение: {scale_factor:.1f}x", 2000)
+
+    def scale_down(self):
+        """Уменьшить выбранные объекты"""
+        scale_factor = 0.9  # Уменьшение на 10%
+        self.canvas.container.scale_selected(scale_factor)
+        self.statusBar().showMessage(f"Уменьшение: {scale_factor:.1f}x", 2000)
+
+    def show_about(self):
+        QMessageBox.about(self, "О программе",
+                          "Векторный редактор Pro\n"
+                          "Лабораторные работы №6 и №7\n\n"
+                          "Реализованные паттерны:\n"
+                          "• Composite - группировка объектов\n"
+                          "• Abstract Factory - создание и сохранение\n"
+                          "• Observer - синхронизация TreeView\n\n"
+                          "Функциональность:\n"
+                          "• Создание и редактирование фигур\n"
+                          "• Группировка и разгруппировка\n"
+                          "• TreeView с полной синхронизацией\n"
+                          "• Сохранение/загрузка в JSON\n"
+                          "• Масштабирование объектов (+/-)")
+
+
+# ==================== Запуск приложения ====================
+
+def main():
+    print("=" * 70)
+    print("ВЕКТОРНЫЙ РЕДАКТОР PRO - ЛАБОРАТОРНЫЕ РАБОТЫ 6 И 7")
+    print("=" * 70)
+
+    app = QApplication(sys.argv)
+    app.setStyle(QStyleFactory.create('Fusion'))
+
+    editor = VectorEditor()
+    editor.show()
+
+    sys.exit(app.exec_())
+
+
+if __name__ == '__main__':
+    main()
