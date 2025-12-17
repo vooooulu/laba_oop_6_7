@@ -1,0 +1,346 @@
+ ==================== Класс стрелки ====================
+
+class Arrow(GraphicObject):
+    """Стрелка, соединяющая два объекта с влиянием на движение"""
+
+    def __init__(self, source: GraphicObject, target: GraphicObject):
+        super().__init__()
+        self.source = source
+        self.target = target
+        self.color = QColor(255, 50, 50)
+        self.selected = False
+        self.parentGroup = None
+
+        if hasattr(source, 'add_moved_callback'):
+            source.add_moved_callback(self.on_source_moved)
+
+    def on_source_moved(self, dx: int, dy: int):
+        """При движении источника двигаем и цель"""
+        if self.target and hasattr(self.target, 'move'):
+            workspace = QRect(0, 0, 1000, 700)
+            self.target.move(dx, dy, workspace)
+
+    def contains_point(self, point: QPoint) -> bool:
+        if not self.source or not self.target:
+            return False
+
+        src_center = self.source.get_bounds().center()
+        tgt_center = self.target.get_bounds().center()
+
+        return self._distance_to_line(point, src_center, tgt_center) < 8
+
+    def _distance_to_line(self, point: QPoint, p1: QPoint, p2: QPoint) -> float:
+        """Расстояние от точки до линии"""
+        if p1 == p2:
+            return math.sqrt((point.x() - p1.x()) ** 2 + (point.y() - p1.y()) ** 2)
+
+        line_length = math.sqrt((p2.x() - p1.x()) ** 2 + (p2.y() - p1.y()) ** 2)
+        if line_length == 0:
+            return 0
+
+        t = max(0, min(1, ((point.x() - p1.x()) * (p2.x() - p1.x()) +
+                           (point.y() - p1.y()) * (p2.y() - p1.y())) / (line_length ** 2)))
+
+        proj_x = p1.x() + t * (p2.x() - p1.x())
+        proj_y = p1.y() + t * (p2.y() - p1.y())
+
+        return math.sqrt((point.x() - proj_x) ** 2 + (point.y() - proj_y) ** 2)
+
+    def move(self, dx: int, dy: int, workspace: QRect):
+        pass
+
+    def resize(self, dw: int, dh: int, workspace: QRect):
+        pass
+
+    def scale(self, factor: float, workspace: QRect):
+        """Стрелка не масштабируется"""
+        pass
+
+    def draw(self, painter: QPainter):
+        if not self.source or not self.target:
+            return
+
+        src_center = self.source.get_bounds().center()
+        tgt_center = self.target.get_bounds().center()
+
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        shadow_pen = QPen(QColor(0, 0, 0, 100), 5)
+        painter.setPen(shadow_pen)
+        painter.drawLine(src_center, tgt_center)
+
+        pen = QPen(self.color, 3)
+        pen.setStyle(Qt.SolidLine)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(src_center, tgt_center)
+
+        self._draw_arrow_head(painter, src_center, tgt_center)
+
+        if self.selected:
+            pen = QPen(QColor(255, 200, 0), 2, Qt.DashLine)
+            painter.setPen(pen)
+            painter.drawLine(src_center, tgt_center)
+
+    def _draw_arrow_head(self, painter, src: QPoint, tgt: QPoint):
+        """Рисует наконечник стрелки"""
+        angle = math.atan2(tgt.y() - src.y(), tgt.x() - src.x())
+        arrow_size = 15
+
+        offset_x = math.cos(angle) * 10
+        offset_y = math.sin(angle) * 10
+        tip_x = tgt.x() - offset_x
+        tip_y = tgt.y() - offset_y
+
+        p1 = QPointF(tip_x, tip_y)
+        p2 = QPointF(
+            tip_x - arrow_size * math.cos(angle - math.pi / 6),
+            tip_y - arrow_size * math.sin(angle - math.pi / 6)
+        )
+        p3 = QPointF(
+            tip_x - arrow_size * math.cos(angle + math.pi / 6),
+            tip_y - arrow_size * math.sin(angle + math.pi / 6)
+        )
+
+        painter.setBrush(QBrush(self.color))
+        painter.setPen(QPen(self.color, 2))
+        painter.drawPolygon([p1, p2, p3])
+
+    def get_children(self) -> List['GraphicObject']:
+        return []
+
+    def get_type_name(self) -> str:
+        return 'arrow'
+
+    def set_color(self, color: QColor):
+        self.color = color
+
+    def save(self) -> Dict[str, Any]:
+        return {
+            'type': 'Arrow',
+            'id': self._id,
+            'selected': self.selected,
+            'color': self.color.name(),
+            'source_id': self.source.id if self.source else '',
+            'target_id': self.target.id if self.target else '',
+            'parentGroup': self.parentGroup
+        }
+
+    def load(self, data: Dict[str, Any]):
+        self._id = data.get('id', self._id)
+        self.selected = data.get('selected', False)
+        self.color = QColor(data['color'])
+        self.parentGroup = data.get('parentGroup')
+
+    def get_bounds(self) -> QRect:
+        if self.source and self.target:
+            src_bounds = self.source.get_bounds()
+            tgt_bounds = self.target.get_bounds()
+            x = min(src_bounds.x(), tgt_bounds.x())
+            y = min(src_bounds.y(), tgt_bounds.y())
+            width = max(src_bounds.right(), tgt_bounds.right()) - x
+            height = max(src_bounds.bottom(), tgt_bounds.bottom()) - y
+            return QRect(x, y, width, height)
+        return super().get_bounds()
+
+
+# ==================== Группа объектов ====================
+
+class Group(GraphicObject, Movable):
+    """Группа объектов (паттерн Composite)"""
+
+    def __init__(self, children: List[GraphicObject] = None):
+        GraphicObject.__init__(self)
+        Movable.__init__(self)
+        self.children = children or []
+        self._update_bounds()
+        self.group_color = QColor(150, 150, 150, 50)
+        self.selected = False
+
+        for child in self.children:
+            if hasattr(child, 'add_moved_callback'):
+                child.add_moved_callback(self.on_child_moved)
+            child.parentGroup = self._id
+
+    def on_child_moved(self, dx: int, dy: int):
+        """Обновляем границы при движении дочернего объекта"""
+        self._update_bounds()
+
+    def _update_bounds(self):
+        if not self.children:
+            self._x = 0
+            self._y = 0
+            self._width = 50
+            self._height = 50
+            return
+
+        min_x = min(child.get_bounds().x() for child in self.children)
+        min_y = min(child.get_bounds().y() for child in self.children)
+        max_x = max(child.get_bounds().right() for child in self.children)
+        max_y = max(child.get_bounds().bottom() for child in self.children)
+
+        self._x = min_x
+        self._y = min_y
+        self._width = max_x - min_x
+        self._height = max_y - min_y
+
+    @property
+    def width(self):
+        return self._width
+
+    @width.setter
+    def width(self, value):
+        self._width = value
+
+    @property
+    def height(self):
+        return self._height
+
+    @height.setter
+    def height(self, value):
+        self._height = value
+
+    def contains_point(self, point: QPoint) -> bool:
+        for child in reversed(self.children):
+            if child.contains_point(point):
+                return True
+        return False
+
+    def move(self, dx: int, dy: int, workspace: QRect):
+        # ВАЖНОЕ ИСПРАВЛЕНИЕ: Проверяем, не выйдет ли группа за границы
+        # как единое целое перед перемещением детей
+
+        # Вычисляем новые границы группы
+        new_x = self._x + dx
+        new_y = self._y + dy
+
+        # Проверяем границы для всей группы
+        can_move_x = True
+        can_move_y = True
+
+        if new_x < 0:
+            can_move_x = False
+        if new_y < 0:
+            can_move_y = False
+        if new_x + self._width > workspace.width():
+            can_move_x = False
+        if new_y + self._height > workspace.height():
+            can_move_y = False
+
+        # Если группа выходит за границы, не двигаем её совсем
+        if not can_move_x:
+            dx = 0
+        if not can_move_y:
+            dy = 0
+
+        # Если группа вообще не может двигаться, выходим
+        if dx == 0 and dy == 0:
+            return
+
+        # Перемещаем всех детей только если группа может двигаться
+        for child in self.children:
+            if hasattr(child, 'move'):
+                child.move(dx, dy, workspace)
+
+        # Обновляем границы группы
+        self._update_bounds()
+
+    def resize(self, dw: int, dh: int, workspace: QRect):
+        if self._width == 0 or self._height == 0:
+            return
+
+        scale_x = 1 + dw / self._width
+        scale_y = 1 + dh / self._height
+
+        for child in self.children:
+            if hasattr(child, 'resize'):
+                bounds = child.get_bounds()
+                rel_x = bounds.x() - self._x
+                rel_y = bounds.y() - self._y
+
+                new_width = bounds.width() * scale_x
+                new_height = bounds.height() * scale_y
+
+                child.resize(new_width - bounds.width(), new_height - bounds.height(), workspace)
+
+        self._update_bounds()
+
+    def scale(self, factor: float, workspace: QRect):
+        """Масштабирование группы"""
+        if factor <= 0:
+            return
+
+        # Масштабируем всех детей группы
+        for child in self.children:
+            if hasattr(child, 'scale'):
+                child.scale(factor, workspace)
+
+        # Обновляем границы группы
+        self._update_bounds()
+
+    def draw(self, painter: QPainter):
+        # Сначала рисуем всех детей
+        for child in self.children:
+            child.draw(painter)
+
+        # Потом рисуем обводку группы поверх
+        if self.children:
+            painter.setBrush(QBrush(self.group_color))
+            painter.setPen(QPen(QColor(100, 100, 100, 100), 1, Qt.DashLine))
+            painter.drawRect(self._x - 5, self._y - 5, self._width + 10, self._height + 10)
+
+        if self.selected:
+            painter.setPen(QPen(QColor(255, 200, 0), 3, Qt.DashDotLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self._x - 8, self._y - 8, self._width + 16, self._height + 16)
+
+            painter.setPen(QPen(QColor(255, 200, 0)))
+            painter.setFont(QFont("Arial", 10, QFont.Bold))
+            painter.drawText(self._x, self._y - 10, f"Группа ({len(self.children)} объектов)")
+
+    def get_children(self) -> List['GraphicObject']:
+        return self.children.copy()
+
+    def get_type_name(self) -> str:
+        return 'group'
+
+    def set_color(self, color: QColor):
+        for child in self.children:
+            child.set_color(color)
+
+    def save(self) -> Dict[str, Any]:
+        return {
+            'type': 'Group',
+            'id': self._id,
+            'x': self._x,
+            'y': self._y,
+            'width': self._width,
+            'height': self._height,
+            'selected': self.selected,
+            'children': [child.save() for child in self.children]
+        }
+
+    def load(self, data: Dict[str, Any]):
+        self._id = data.get('id', self._id)
+        self._x = data['x']
+        self._y = data['y']
+        self._width = data['width']
+        self._height = data['height']
+        self.selected = data.get('selected', False)
+
+        # ВАЖНО: Загружаем детей группы
+        self.children = []
+
+        for child_data in data.get('children', []):
+            child_type = child_data['type']
+            child = GraphicObjectFactory.create_object(child_type)
+            child.load(child_data)
+            child.parentGroup = self._id
+
+            # Добавляем callback для движения
+            if hasattr(child, 'add_moved_callback'):
+                child.add_moved_callback(self.on_child_moved)
+
+            self.children.append(child)
+
+        self._update_bounds()
