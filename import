@@ -1,0 +1,130 @@
+import sys
+import json
+import uuid
+import math
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QToolBar, QAction, QColorDialog, QMessageBox,
+                             QFileDialog, QTreeView, QSplitter, QHBoxLayout,
+                             QStyle, QLabel, QStatusBar, QStyleFactory)
+from PyQt5.QtCore import (Qt, QRect, QPoint, QAbstractItemModel, QModelIndex,
+                          pyqtSignal, QObject, QPointF, QSize)
+from PyQt5.QtGui import (QPainter, QColor, QPen, QKeyEvent, QMouseEvent, QBrush,
+                         QLinearGradient, QRadialGradient, QFont, QCursor)
+
+
+# ==================== Паттерн Observer ====================
+
+class Subject(QObject):
+    """Субъект для паттерна Observer"""
+    changed = pyqtSignal()
+
+    def attach(self, observer):
+        self.changed.connect(observer.update_view)
+
+    def detach(self, observer):
+        try:
+            self.changed.disconnect(observer.update_view)
+        except:
+            pass
+
+    def notify(self):
+        self.changed.emit()
+
+
+class Observer(ABC):
+    @abstractmethod
+    def update_view(self):
+        pass
+
+
+# ==================== Паттерн Composite ====================
+
+class GraphicObject(ABC):
+    """Абстрактный базовый класс для всех графических объектов"""
+
+    def __init__(self):
+        self._id = str(uuid.uuid4())
+        self.selected = False
+        self.parentGroup = None
+        self._x = 0
+        self._y = 0
+
+    @property
+    def id(self):
+        return self._id
+
+    @property
+    def x(self):
+        return self._x
+
+    @x.setter
+    def x(self, value):
+        self._x = value
+
+    @property
+    def y(self):
+        return self._y
+
+    @y.setter
+    def y(self, value):
+        self._y = value
+
+    @abstractmethod
+    def contains_point(self, point: QPoint) -> bool:
+        pass
+
+    @abstractmethod
+    def move(self, dx: int, dy: int, workspace: QRect):
+        pass
+
+    @abstractmethod
+    def resize(self, dw: int, dh: int, workspace: QRect):
+        pass
+
+    @abstractmethod
+    def draw(self, painter: QPainter):
+        pass
+
+    @abstractmethod
+    def save(self) -> Dict[str, Any]:
+        pass
+
+    @abstractmethod
+    def load(self, data: Dict[str, Any]):
+        pass
+
+    @abstractmethod
+    def get_children(self) -> List['GraphicObject']:
+        pass
+
+    @abstractmethod
+    def get_type_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def set_color(self, color: QColor):
+        pass
+
+    def get_position(self) -> QPoint:
+        return QPoint(self._x, self._y)
+
+    def get_bounds(self) -> QRect:
+        return QRect(self._x, self._y, 1, 1)
+
+
+# ==================== Класс движения ====================
+
+class Movable:
+    """Миксин для объектов, которые могут двигаться"""
+
+    def __init__(self):
+        self._moved_callbacks = []
+
+    def add_moved_callback(self, callback):
+        self._moved_callbacks.append(callback)
+
+    def notify_moved(self, dx: int, dy: int):
+        for callback in self._moved_callbacks:
+            callback(dx, dy)
