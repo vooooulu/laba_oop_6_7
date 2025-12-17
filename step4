@@ -1,0 +1,522 @@
+# ==================== Abstract Factory ====================
+
+class GraphicObjectFactory:
+    """Фабрика для создания графических объектов"""
+
+    @staticmethod
+    def create_object(obj_type: str, x: float = 0, y: float = 0) -> GraphicObject:
+        obj_type_lower = obj_type.lower()
+
+        if obj_type_lower == "rectangle" or obj_type_lower == "прямоугольник":
+            return Rectangle(x, y)
+        elif obj_type_lower == "circle" or obj_type_lower == "круг":
+            return Circle(x, y)
+        elif obj_type_lower == "triangle" or obj_type_lower == "треугольник":
+            return Triangle(x, y)
+        elif obj_type_lower == "line" or obj_type_lower == "линия":
+            return Line(x, y)
+        elif obj_type_lower == "ellipse" or obj_type_lower == "эллипс":
+            return Ellipse(x, y)
+        elif obj_type_lower == "square" or obj_type_lower == "квадрат":
+            return Square(x, y, 50)
+        elif obj_type_lower == "group" or obj_type_lower == "группа":
+            return Group()
+        else:
+            return Rectangle(x, y)  # По умолчанию
+
+
+# ==================== Контейнер с Observer ====================
+
+class GraphicContainer(Subject):
+    """Контейнер для хранения графических объектов с поддержкой уведомлений"""
+
+    def __init__(self):
+        super().__init__()
+        self._objects = []
+        self._selected_objects = set()
+
+    def add(self, obj: GraphicObject):
+        self._objects.append(obj)
+        self.notify()
+
+    def remove(self, obj: GraphicObject):
+        if obj in self._objects:
+            self._objects.remove(obj)
+        if obj in self._selected_objects:
+            self._selected_objects.remove(obj)
+
+        arrows_to_remove = []
+        for item in self._objects:
+            if isinstance(item, Arrow) and (item.source == obj or item.target == obj):
+                arrows_to_remove.append(item)
+
+        for arrow in arrows_to_remove:
+            self._objects.remove(arrow)
+
+        self.notify()
+
+    def clear(self):
+        self._objects.clear()
+        self._selected_objects.clear()
+        self.notify()
+
+    def clear_selection(self):
+        for obj in self._selected_objects:
+            obj.selected = False
+        self._selected_objects.clear()
+        self.notify()
+
+    def select(self, obj: GraphicObject):
+        obj.selected = True
+        self._selected_objects.add(obj)
+        self.notify()
+
+    def deselect(self, obj: GraphicObject):
+        obj.selected = False
+        self._selected_objects.discard(obj)
+        self.notify()
+
+    def get_selected(self) -> List[GraphicObject]:
+        return list(self._selected_objects)
+
+    def get_all(self) -> List[GraphicObject]:
+        return self._objects.copy()
+
+    def group_selected(self) -> Optional[Group]:
+        selected = self.get_selected()
+
+        valid_objects = []
+        for obj in selected:
+            if not isinstance(obj, Arrow) and not isinstance(obj, Group):
+                valid_objects.append(obj)
+
+        if len(valid_objects) < 2:
+            return None
+
+        group = Group(valid_objects.copy())
+
+        # Удаляем объекты из основного списка и добавляем группу
+        for obj in valid_objects:
+            if obj in self._objects:
+                self._objects.remove(obj)
+
+        self._objects.append(group)
+        self.clear_selection()
+        self.select(group)
+        self.notify()
+        return group
+
+    def ungroup_selected(self):
+        selected = self.get_selected()
+        groups_to_ungroup = [obj for obj in selected if isinstance(obj, Group)]
+
+        for group in groups_to_ungroup:
+            self.ungroup_group(group)
+
+        self.notify()
+
+    def ungroup_group(self, group: Group):
+        """Разгруппировка конкретной группы"""
+        children = group.get_children()
+
+        # Очищаем parentGroup у всех дочерних объектов
+        for child in children:
+            child.parentGroup = None
+
+        # Удаляем группу и добавляем детей
+        if group in self._objects:
+            self._objects.remove(group)
+
+        for child in children:
+            if child not in self._objects:
+                self._objects.append(child)
+                child.selected = True
+                self._selected_objects.add(child)
+
+    def save_to_file(self, filename: str) -> bool:
+        try:
+            data = {
+                'version': '2.0',
+                'objects': [obj.save() for obj in self._objects]
+            }
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as e:
+            print(f"Ошибка сохранения: {e}")
+            return False
+
+    def load_from_file(self, filename: str) -> bool:
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            self.clear()
+            self._objects = []
+            loaded_objects = {}  # Карта id -> объект
+            arrows_data = []
+            groups_data = []
+
+            # 1. Загружаем все объекты, кроме стрелок
+            for obj_data in data['objects']:
+                obj_type = obj_data['type']
+
+                if obj_type == 'Arrow':
+                    arrows_data.append(obj_data)
+                    continue
+
+                obj = GraphicObjectFactory.create_object(obj_type)
+                obj.load(obj_data)
+                loaded_objects[obj.id] = obj
+
+                if isinstance(obj, Group):
+                    groups_data.append(obj)
+
+            # 2. Добавляем объекты в контейнер (кроме детей групп)
+            for obj_id, obj in loaded_objects.items():
+                # Не добавляем детей групп, они будут добавлены через свои группы
+                if hasattr(obj, 'parentGroup') and obj.parentGroup:
+                    # Проверяем, существует ли родительская группа
+                    parent_exists = any(g.id == obj.parentGroup for g in groups_data)
+                    if not parent_exists:
+                        self._objects.append(obj)
+                else:
+                    self._objects.append(obj)
+
+            # 3. Загружаем стрелки
+            for arrow_data in arrows_data:
+                arrow = Arrow(None, None)
+                arrow.load(arrow_data)
+
+                source_id = arrow_data.get('source_id')
+                target_id = arrow_data.get('target_id')
+
+                source = loaded_objects.get(source_id)
+                target = loaded_objects.get(target_id)
+
+                if source and target:
+                    arrow.source = source
+                    arrow.target = target
+                    self._objects.append(arrow)
+
+            self.notify()
+            return True
+        except Exception as e:
+            print(f"Ошибка загрузки: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def scale_selected(self, factor: float):
+        """Масштабирование выбранных объектов"""
+        selected = self.get_selected()
+        if not selected:
+            return
+
+        workspace = QRect(0, 0, 1000, 700)
+        for obj in selected:
+            if hasattr(obj, 'scale'):
+                obj.scale(factor, workspace)
+
+        self.notify()
+
+
+# ==================== TreeView Model ====================
+
+class TreeViewModel(QAbstractItemModel):
+    def __init__(self, container: GraphicContainer):
+        super().__init__()
+        self.container = container
+        self.container.changed.connect(self.update_view)
+        self.root_item = {"name": "Объекты", "object": None, "children": [], "parent": None}
+        self._build_tree()
+
+    def update_view(self):
+        self.beginResetModel()
+        self._build_tree()
+        self.endResetModel()
+
+    def _build_tree(self):
+        self.root_item["children"] = []
+        for i, obj in enumerate(self.container.get_all()):
+            self._add_node(obj, self.root_item, i + 1)
+
+    def _add_node(self, obj, parent_node, index):
+        name = f"{obj.get_type_name().capitalize()} {index}"
+        if isinstance(obj, Group):
+            name = f"Группа {index} ({len(obj.children)} объектов)"
+
+        item = {
+            "name": name,
+            "object": obj,
+            "children": [],
+            "parent": parent_node
+        }
+        parent_node["children"].append(item)
+
+        for j, child in enumerate(obj.get_children()):
+            self._add_node(child, item, j + 1)
+
+    def index(self, row, column, parent=QModelIndex()):
+        if not self.hasIndex(row, column, parent):
+            return QModelIndex()
+
+        parent_item = parent.internalPointer() if parent.isValid() else self.root_item
+        if row < len(parent_item["children"]):
+            return self.createIndex(row, column, parent_item["children"][row])
+        return QModelIndex()
+
+    def parent(self, index):
+        if not index.isValid():
+            return QModelIndex()
+
+        child_item = index.internalPointer()
+        parent_item = child_item.get("parent")
+
+        if parent_item is None or parent_item is self.root_item:
+            return QModelIndex()
+
+        grandparent = parent_item.get("parent", self.root_item)
+        row = grandparent["children"].index(parent_item)
+        return self.createIndex(row, 0, parent_item)
+
+    def rowCount(self, parent=QModelIndex()):
+        if parent.column() > 0:
+            return 0
+
+        parent_item = parent.internalPointer() if parent.isValid() else self.root_item
+        return len(parent_item["children"])
+
+    def columnCount(self, parent=QModelIndex()):
+        return 2
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+
+        item = index.internalPointer()
+        obj = item["object"]
+
+        if role == Qt.DisplayRole:
+            if index.column() == 0:
+                return item["name"]
+            elif index.column() == 1:
+                return obj.get_type_name().capitalize()
+
+        elif role == Qt.CheckStateRole and index.column() == 0:
+            return Qt.Checked if obj.selected else Qt.Unchecked
+
+        elif role == Qt.DecorationRole and index.column() == 0:
+            if isinstance(obj, Group):
+                return QApplication.style().standardIcon(QStyle.SP_DirIcon)
+            elif isinstance(obj, Arrow):
+                return QApplication.style().standardIcon(QStyle.SP_ArrowRight)
+            else:
+                return QApplication.style().standardIcon(QStyle.SP_FileIcon)
+
+        elif role == Qt.FontRole and obj.selected:
+            font = QFont()
+            font.setBold(True)
+            return font
+
+        elif role == Qt.ForegroundRole:
+            if isinstance(obj, Group):
+                return QColor(0, 100, 200)
+            elif isinstance(obj, Arrow):
+                return QColor(200, 0, 0)
+
+        return None
+
+    def setData(self, index, value, role=Qt.EditRole):
+        if role == Qt.CheckStateRole and index.column() == 0:
+            item = index.internalPointer()
+            obj = item["object"]
+
+            ctrl_pressed = QApplication.keyboardModifiers() & Qt.ControlModifier
+
+            if not ctrl_pressed:
+                self.container.clear_selection()
+
+            if value == Qt.Checked:
+                self.container.select(obj)
+            else:
+                self.container.deselect(obj)
+
+            return True
+
+        return False
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+            return ["Название", "Тип"][section]
+        return None
+
+    def flags(self, index):
+        if not index.isValid():
+            return Qt.NoItemFlags
+
+        flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable
+        if index.column() == 0:
+            flags |= Qt.ItemIsUserCheckable
+        return flags
+
+
+# ==================== Панель свойств ====================
+
+class PropertiesPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.container = None
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
+
+        self.title_label = QLabel("Свойства")
+        self.title_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #ffffff;")
+        layout.addWidget(self.title_label)
+
+        self.info_label = QLabel("Выберите объект")
+        self.info_label.setStyleSheet("color: #aaaaaa;")
+        layout.addWidget(self.info_label)
+
+        # Панель для позиции
+        pos_widget = QWidget()
+        pos_layout = QHBoxLayout(pos_widget)
+        pos_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.x_label = QLabel("X:")
+        self.x_value = QLabel("0")
+        self.x_value.setStyleSheet("color: #ffffff;")
+
+        self.y_label = QLabel("Y:")
+        self.y_value = QLabel("0")
+        self.y_value.setStyleSheet("color: #ffffff;")
+
+        pos_layout.addWidget(self.x_label)
+        pos_layout.addWidget(self.x_value)
+        pos_layout.addWidget(QLabel("   "))
+        pos_layout.addWidget(self.y_label)
+        pos_layout.addWidget(self.y_value)
+
+        layout.addWidget(pos_widget)
+
+        # Панель для размера
+        size_widget = QWidget()
+        size_layout = QHBoxLayout(size_widget)
+        size_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.width_label = QLabel("Ширина:")
+        self.width_value = QLabel("0")
+        self.width_value.setStyleSheet("color: #ffffff;")
+
+        self.height_label = QLabel("Высота:")
+        self.height_value = QLabel("0")
+        self.height_value.setStyleSheet("color: #ffffff;")
+
+        size_layout.addWidget(self.width_label)
+        size_layout.addWidget(self.width_value)
+        size_layout.addWidget(QLabel("   "))
+        size_layout.addWidget(self.height_label)
+        size_layout.addWidget(self.height_value)
+
+        layout.addWidget(size_widget)
+
+        # Панель для типа
+        type_widget = QWidget()
+        type_layout = QHBoxLayout(type_widget)
+        type_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.type_label = QLabel("Тип:")
+        self.type_value = QLabel("Неизвестно")
+        self.type_value.setStyleSheet("color: #ffffff;")
+
+        type_layout.addWidget(self.type_label)
+        type_layout.addWidget(self.type_value)
+
+        layout.addWidget(type_widget)
+
+        # Панель для дополнительной информации
+        self.extra_label = QLabel("")
+        self.extra_label.setStyleSheet("color: #88aaff;")
+        layout.addWidget(self.extra_label)
+
+        layout.addStretch()
+
+        self.setLayout(layout)
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #3a3a3a;
+                border: 1px solid #4a4a4a;
+                border-radius: 5px;
+            }
+            QLabel {
+                color: #cccccc;
+            }
+        """)
+
+    def set_container(self, container):
+        self.container = container
+        container.changed.connect(self.update_properties)
+
+    def update_properties(self):
+        if not self.container:
+            return
+
+        selected = self.container.get_selected()
+
+        if not selected:
+            self.info_label.setText("Выберите объект")
+            self.type_value.setText("Неизвестно")
+            self.x_value.setText("0")
+            self.y_value.setText("0")
+            self.width_value.setText("0")
+            self.height_value.setText("0")
+            self.extra_label.setText("")
+            return
+
+        if len(selected) == 1:
+            obj = selected[0]
+            self.info_label.setText("Выбран 1 объект")
+            self.type_value.setText(obj.get_type_name().capitalize())
+
+            bounds = obj.get_bounds()
+            self.x_value.setText(str(bounds.x()))
+            self.y_value.setText(str(bounds.y()))
+            self.width_value.setText(str(bounds.width()))
+            self.height_value.setText(str(bounds.height()))
+
+            # Дополнительная информация для групп
+            if isinstance(obj, Group):
+                self.extra_label.setText(f"Объектов в группе: {len(obj.children)}")
+                self.type_value.setText(f"Группа ({len(obj.children)} объектов)")
+            elif isinstance(obj, Arrow):
+                self.extra_label.setText("Стрелка (связывает объекты)")
+            else:
+                self.extra_label.setText("")
+        else:
+            self.info_label.setText(f"Выбрано {len(selected)} объектов")
+            self.type_value.setText("Несколько объектов")
+
+            # Подсчитываем статистику
+            groups = [obj for obj in selected if isinstance(obj, Group)]
+            shapes = [obj for obj in selected if not isinstance(obj, Group) and not isinstance(obj, Arrow)]
+            arrows = [obj for obj in selected if isinstance(obj, Arrow)]
+
+            stats = []
+            if shapes:
+                stats.append(f"Фигуры: {len(shapes)}")
+            if groups:
+                total_children = sum(len(group.children) for group in groups)
+                stats.append(f"Группы: {len(groups)} ({total_children} объектов)")
+            if arrows:
+                stats.append(f"Стрелки: {len(arrows)}")
+
+            self.extra_label.setText(" | ".join(stats))
+            self.x_value.setText("N/A")
+            self.y_value.setText("N/A")
+            self.width_value.setText("N/A")
+            self.height_value.setText("N/A")
+
