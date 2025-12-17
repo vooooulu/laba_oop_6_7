@@ -1,0 +1,292 @@
+# ==================== Формы ====================
+
+class Shape(GraphicObject, Movable):
+    """Базовый класс для простых фигур"""
+
+    def __init__(self, x=0, y=0, width=50, height=50, color=QColor(100, 150, 255)):
+        GraphicObject.__init__(self)
+        Movable.__init__(self)
+        self._x = x
+        self._y = y
+        self._width = max(10, width)
+        self._height = max(10, height)
+        self.color = color
+        self.fill_color = QColor(color)
+        self.fill_color.setAlpha(150)
+        self.border_color = QColor(color.darker(120))
+        self.border_width = 2
+        self.selected = False
+
+    @property
+    def width(self):
+        return self._width
+
+    @width.setter
+    def width(self, value):
+        self._width = max(10, value)
+
+    @property
+    def height(self):
+        return self._height
+
+    @height.setter
+    def height(self, value):
+        self._height = max(10, value)
+
+    def contains_point(self, point: QPoint) -> bool:
+        return (self._x <= point.x() <= self._x + self._width and
+                self._y <= point.y() <= self._y + self._height)
+
+    def move(self, dx: int, dy: int, workspace: QRect):
+        new_x = self._x + dx
+        new_y = self._y + dy
+
+        if new_x < 0:
+            new_x = 0
+        if new_y < 0:
+            new_y = 0
+        if new_x + self._width > workspace.width():
+            new_x = workspace.width() - self._width
+        if new_y + self._height > workspace.height():
+            new_y = workspace.height() - self._height
+
+        self._x = new_x
+        self._y = new_y
+
+    def resize(self, dw: int, dh: int, workspace: QRect):
+        new_width = self._width + dw
+        new_height = self._height + dh
+
+        if new_width < 10:
+            new_width = 10
+        if new_height < 10:
+            new_height = 10
+
+        if self._x + new_width > workspace.width():
+            new_width = workspace.width() - self._x
+        if self._y + new_height > workspace.height():
+            new_height = workspace.height() - self._y
+
+        self._width = new_width
+        self._height = new_height
+
+    def scale(self, factor: float, workspace: QRect):
+        """Масштабирование фигуры"""
+        if factor <= 0:
+            return
+
+        # Сохраняем центр фигуры
+        center_x = self._x + self._width / 2
+        center_y = self._y + self._height / 2
+
+        # Вычисляем новые размеры
+        new_width = max(10, int(self._width * factor))
+        new_height = max(10, int(self._height * factor))
+
+        # Вычисляем новую позицию (чтобы центр остался на месте)
+        new_x = center_x - new_width / 2
+        new_y = center_y - new_height / 2
+
+        # Проверяем границы
+        if new_x < 0:
+            new_x = 0
+        if new_y < 0:
+            new_y = 0
+        if new_x + new_width > workspace.width():
+            new_x = workspace.width() - new_width
+        if new_y + new_height > workspace.height():
+            new_y = workspace.height() - new_height
+
+        # Применяем изменения
+        self._x = int(new_x)
+        self._y = int(new_y)
+        self._width = new_width
+        self._height = new_height
+
+    def get_children(self) -> List['GraphicObject']:
+        return []
+
+    def get_type_name(self) -> str:
+        return self.__class__.__name__.lower()
+
+    def set_color(self, color: QColor):
+        self.color = color
+        self.fill_color = QColor(color)
+        self.fill_color.setAlpha(150)
+        self.border_color = QColor(color.darker(120))
+
+    def save(self) -> Dict[str, Any]:
+        return {
+            'id': self._id,
+            'type': self.__class__.__name__,
+            'x': self._x,
+            'y': self._y,
+            'width': self._width,
+            'height': self._height,
+            'color': self.color.name(),
+            'selected': self.selected,
+            'parentGroup': self.parentGroup
+        }
+
+    def load(self, data: Dict[str, Any]):
+        self._id = data.get('id', self._id)
+        self._x = data['x']
+        self._y = data['y']
+        self._width = data['width']
+        self._height = data['height']
+        self.color = QColor(data['color'])
+        self.fill_color = QColor(self.color)
+        self.fill_color.setAlpha(150)
+        self.border_color = QColor(self.color.darker(120))
+        self.selected = data.get('selected', False)
+        self.parentGroup = data.get('parentGroup')
+
+    def get_bounds(self) -> QRect:
+        return QRect(self._x, self._y, self._width, self._height)
+
+
+class Rectangle(Shape):
+    """Прямоугольник с закругленными углами"""
+
+    def draw(self, painter: QPainter):
+        gradient = QLinearGradient(self.x, self.y, self.x + self.width, self.y + self.height)
+        gradient.setColorAt(0, self.fill_color.lighter(120))
+        gradient.setColorAt(1, self.fill_color.darker(110))
+
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(self.border_color, self.border_width))
+
+        painter.drawRoundedRect(self.x, self.y, self.width, self.height, 10, 10)
+
+        if self.selected:
+            painter.setPen(QPen(QColor(255, 200, 0), 3, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(self.x - 4, self.y - 4,
+                                    self.width + 8, self.height + 8, 12, 12)
+
+
+class Circle(Shape):
+    """Круг с градиентной заливкой"""
+
+    def draw(self, painter: QPainter):
+        gradient = QRadialGradient(self.x + self.width / 2, self.y + self.height / 2,
+                                   min(self.width, self.height) / 2)
+        gradient.setColorAt(0, self.fill_color.lighter(150))
+        gradient.setColorAt(1, self.fill_color.darker(120))
+
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(self.border_color, self.border_width))
+        painter.drawEllipse(self.x, self.y, self.width, self.height)
+
+        if self.selected:
+            painter.setPen(QPen(QColor(0, 200, 255), 3, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(self.x - 4, self.y - 4,
+                                self.width + 8, self.height + 8)
+
+
+class Triangle(Shape):
+    """Треугольник с градиентом"""
+
+    def draw(self, painter: QPainter):
+        points = [
+            QPoint(self.x + self.width // 2, self.y),
+            QPoint(self.x, self.y + self.height),
+            QPoint(self.x + self.width, self.y + self.height)
+        ]
+
+        gradient = QLinearGradient(self.x, self.y, self.x + self.width, self.y + self.height)
+        gradient.setColorAt(0, self.fill_color.lighter(130))
+        gradient.setColorAt(1, self.fill_color.darker(110))
+
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(self.border_color, self.border_width))
+        painter.drawPolygon(points)
+
+        if self.selected:
+            painter.setPen(QPen(QColor(200, 100, 255), 3, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            expanded_points = [
+                QPoint(self.x + self.width // 2, self.y - 4),
+                QPoint(self.x - 4, self.y + self.height + 4),
+                QPoint(self.x + self.width + 4, self.y + self.height + 4)
+            ]
+            painter.drawPolygon(expanded_points)
+
+
+class Line(Shape):
+    """Линия со стилем"""
+
+    def __init__(self, x=0, y=0, width=60, height=40, color=QColor(255, 100, 100)):
+        super().__init__(x, y, width, height, color)
+        self.line_style = Qt.SolidLine
+
+    def draw(self, painter: QPainter):
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        shadow_pen = QPen(QColor(0, 0, 0, 80), 4)
+        painter.setPen(shadow_pen)
+        painter.drawLine(self.x + 2, self.y + 2,
+                         self.x + self.width + 2, self.y + self.height + 2)
+
+        pen = QPen(self.color, 3, self.line_style)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(self.x, self.y, self.x + self.width, self.y + self.height)
+
+        if self.selected:
+            painter.setPen(QPen(QColor(255, 200, 0), 2, Qt.DashLine))
+            painter.drawRect(self.x - 6, self.y - 6,
+                             self.width + 12, self.height + 12)
+
+
+class Ellipse(Shape):
+    """Эллипс со стильным оформлением"""
+
+    def draw(self, painter: QPainter):
+        gradient = QRadialGradient(self.x + self.width / 2, self.y + self.height / 2,
+                                   max(self.width, self.height) / 2)
+        gradient.setColorAt(0, self.fill_color.lighter(140))
+        gradient.setColorAt(0.7, self.fill_color)
+        gradient.setColorAt(1, self.fill_color.darker(130))
+
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(self.border_color, self.border_width))
+        painter.drawEllipse(self.x, self.y, self.width, self.height)
+
+        if self.selected:
+            painter.setPen(QPen(QColor(100, 255, 100), 3, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(self.x - 4, self.y - 4,
+                                self.width + 8, self.height + 8)
+
+
+class Square(Shape):
+    """Квадрат с эффектом объема"""
+
+    def __init__(self, x=0, y=0, size=50, color=QColor(255, 150, 50)):
+        super().__init__(x, y, size, size, color)
+
+    def draw(self, painter: QPainter):
+        painter.setPen(Qt.NoPen)
+
+        painter.setBrush(QBrush(QColor(0, 0, 0, 60)))
+        painter.drawRect(self.x + 3, self.y + 3, self.width, self.height)
+
+        gradient = QLinearGradient(self.x, self.y, self.x + self.width, self.y + self.height)
+        gradient.setColorAt(0, self.fill_color.lighter(130))
+        gradient.setColorAt(1, self.fill_color.darker(110))
+
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(self.border_color, self.border_width))
+        painter.drawRect(self.x, self.y, self.width, self.height)
+
+        painter.setPen(QPen(self.fill_color.lighter(150), 1))
+        painter.drawLine(self.x, self.y, self.x + self.width, self.y)
+        painter.drawLine(self.x, self.y, self.x, self.y + self.height)
+
+        if self.selected:
+            painter.setPen(QPen(QColor(255, 150, 50), 3, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self.x - 4, self.y - 4,
+                             self.width + 8, self.height + 8)
